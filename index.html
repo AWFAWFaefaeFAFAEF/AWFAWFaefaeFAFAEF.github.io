@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Discord Song Player</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎵 Discord Song Player</h1>
+            <p>Upload songs via Discord bot using: <code>!upload [file]</code></p>
+        </header>
+
+        <div class="player">
+            <div class="song-info">
+                <div class="song-title" id="songTitle">No song selected</div>
+                <div class="song-artist" id="songArtist">Unknown Artist</div>
+            </div>
+
+            <div class="controls">
+                <button id="prevBtn">⏮️</button>
+                <button id="playPauseBtn">▶️</button>
+                <button id="nextBtn">⏭️</button>
+            </div>
+
+            <div class="progress-container">
+                <div class="time" id="currentTime">0:00</div>
+                <div class="progress-bar">
+                    <div class="progress" id="progress"></div>
+                </div>
+                <div class="time" id="duration">0:00</div>
+            </div>
+
+            <div class="volume-container">
+                <span>🔊</span>
+                <input type="range" id="volumeSlider" min="0" max="100" value="50">
+            </div>
+
+            <audio id="audioPlayer" preload="metadata"></audio>
+        </div>
+
+        <div class="playlist">
+            <h3>Playlist</h3>
+            <div id="songList" class="song-list">
+                <p class="no-songs">No songs uploaded yet. Use Discord bot to upload!</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
