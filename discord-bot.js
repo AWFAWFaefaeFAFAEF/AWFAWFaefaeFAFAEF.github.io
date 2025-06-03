@@ -3,7 +3,78 @@ const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
 const path = require('path');
-require('dotenv').config();
+
+// Remote configuration URL
+const REMOTE_ENV_URL = 'https://raw.githubusercontent.com/AWFAWFaefaeFAFAEF/.env/refs/heads/main/.env?token=GHSAT0AAAAAADE5QSIKAK27XEPZOF7JI7J22B6KDKA';
+
+// Configuration variables
+let BOT_TOKEN;
+let CLIENT_ID;
+let WEB_SERVER_URL;
+
+// Function to load remote environment configuration
+async function loadRemoteConfig() {
+    try {
+        console.log('🔄 Loading configuration from remote source...');
+        
+        const response = await axios.get(REMOTE_ENV_URL, {
+            timeout: 10000,
+            headers: {
+                'User-Agent': 'Discord-Music-Bot/1.0'
+            }
+        });
+        
+        const envContent = response.data;
+        const envLines = envContent.split('\n');
+        
+        // Parse environment variables
+        const config = {};
+        envLines.forEach(line => {
+            const trimmedLine = line.trim();
+            if (trimmedLine && !trimmedLine.startsWith('#')) {
+                const [key, ...valueParts] = trimmedLine.split('=');
+                if (key && valueParts.length > 0) {
+                    config[key.trim()] = valueParts.join('=').trim();
+                }
+            }
+        });
+        
+        // Set configuration variables
+        BOT_TOKEN = config.DISCORD_BOT_TOKEN;
+        CLIENT_ID = config.DISCORD_CLIENT_ID;
+        WEB_SERVER_URL = config.WEB_SERVER_URL || 'http://localhost:3000';
+        
+        if (!BOT_TOKEN) {
+            throw new Error('DISCORD_BOT_TOKEN not found in remote configuration');
+        }
+        
+        console.log('✅ Remote configuration loaded successfully');
+        console.log(`🌐 Web Server URL: ${WEB_SERVER_URL}`);
+        
+        return true;
+        
+    } catch (error) {
+        console.error('❌ Failed to load remote configuration:', error.message);
+        
+        // Fallback to local .env if remote fails
+        console.log('🔄 Attempting to load local .env as fallback...');
+        try {
+            require('dotenv').config();
+            BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
+            CLIENT_ID = process.env.DISCORD_CLIENT_ID;
+            WEB_SERVER_URL = process.env.WEB_SERVER_URL || 'http://localhost:3000';
+            
+            if (BOT_TOKEN) {
+                console.log('✅ Local .env loaded as fallback');
+                return true;
+            }
+        } catch (localError) {
+            console.error('❌ Local .env fallback also failed:', localError.message);
+        }
+        
+        return false;
+    }
+}
 
 // Bot configuration
 const client = new Client({
@@ -14,15 +85,6 @@ const client = new Client({
         GatewayIntentBits.GuildVoiceStates
     ]
 });
-
-const WEB_SERVER_URL = process.env.WEB_SERVER_URL || 'http://localhost:3000';
-const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
-const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
-
-if (!BOT_TOKEN) {
-    console.error('❌ DISCORD_BOT_TOKEN is required in .env file');
-    process.exit(1);
-}
 
 // Slash Commands
 const commands = [
@@ -61,7 +123,11 @@ const commands = [
     
     new SlashCommandBuilder()
         .setName('help')
-        .setDescription('Show bot commands and usage')
+        .setDescription('Show bot commands and usage'),
+    
+    new SlashCommandBuilder()
+        .setName('config')
+        .setDescription('Show current bot configuration (Admin only)')
 ];
 
 // Register slash commands
@@ -96,7 +162,22 @@ client.once('ready', async () => {
     
     // Register slash commands
     await registerCommands();
+    
+    // Test web server connection
+    await testWebServerConnection();
 });
+
+// Test web server connection
+async function testWebServerConnection() {
+    try {
+        console.log('🔄 Testing web server connection...');
+        const response = await axios.get(`${WEB_SERVER_URL}/api/songs`, { timeout: 5000 });
+        console.log('✅ Web server connection successful');
+    } catch (error) {
+        console.warn('⚠️ Could not connect to web server:', error.message);
+        console.warn('🔧 Make sure the web server is running and accessible');
+    }
+}
 
 // Handle slash commands
 client.on('interactionCreate', async (interaction) => {
@@ -120,6 +201,9 @@ client.on('interactionCreate', async (interaction) => {
                 break;
             case 'help':
                 await handleSlashHelp(interaction);
+                break;
+            case 'config':
+                await handleSlashConfig(interaction);
                 break;
         }
     } catch (error) {
@@ -145,7 +229,7 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.commandName === 'delete') {
         try {
-            const response = await axios.get(`${WEB_SERVER_URL}/api/songs`);
+            const response = await axios.get(`${WEB_SERVER_URL}/api/songs`, { timeout: 5000 });
             const songs = response.data;
             
             const focusedValue = interaction.options.getFocused();
@@ -165,6 +249,33 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 });
+
+// Config command handler
+async function handleSlashConfig(interaction) {
+    // Check if user has admin permissions
+    if (!interaction.member.permissions.has('ADMINISTRATOR')) {
+        const embed = new EmbedBuilder()
+            .setColor(0xFF0000)
+            .setTitle('❌ Access Denied')
+            .setDescription('This command requires Administrator permissions.');
+        
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    const embed = new EmbedBuilder()
+        .setColor(0x7289DA)
+        .setTitle('🔧 Bot Configuration')
+        .addFields(
+            { name: '🌐 Web Server URL', value: WEB_SERVER_URL || 'Not set', inline: false },
+            { name: '🤖 Client ID', value: CLIENT_ID ? '✅ Set' : '❌ Not set', inline: true },
+            { name: '🔑 Bot Token', value: BOT_TOKEN ? '✅ Set' : '❌ Not set', inline: true },
+            { name: '📡 Remote Config URL', value: '✅ Active', inline: true }
+        )
+        .setFooter({ text: 'Configuration loaded from remote source' })
+        .setTimestamp();
+
+    await interaction.reply({ embeds: [embed], ephemeral: true });
+}
 
 // Handle legacy text commands (for backwards compatibility)
 client.on('messageCreate', async (message) => {
@@ -187,9 +298,64 @@ client.on('messageCreate', async (message) => {
     if (message.content === '!help') {
         await handleLegacyHelp(message);
     }
+
+    if (message.content === '!config' && message.member.permissions.has('ADMINISTRATOR')) {
+        await handleLegacyConfig(message);
+    }
+
+    // Reload config command
+    if (message.content === '!reload-config' && message.member.permissions.has('ADMINISTRATOR')) {
+        await handleReloadConfig(message);
+    }
 });
 
-// Slash command handlers
+// Reload config handler
+async function handleReloadConfig(message) {
+    const loadingMsg = await message.reply('🔄 Reloading configuration...');
+    
+    const success = await loadRemoteConfig();
+    
+    if (success) {
+        const embed = new EmbedBuilder()
+            .setColor(0x00FF00)
+            .setTitle('✅ Configuration Reloaded')
+            .setDescription('Remote configuration has been successfully reloaded!')
+            .addFields({ name: '🌐 Web Server URL', value: WEB_SERVER_URL })
+            .setTimestamp();
+        
+        await loadingMsg.edit({ content: '', embeds: [embed] });
+    } else {
+        const embed = new EmbedBuilder()
+            .setColor(0xFF0000)
+            .setTitle('❌ Reload Failed')
+            .setDescription('Could not reload remote configuration. Using current settings.')
+            .setTimestamp();
+        
+        await loadingMsg.edit({ content: '', embeds: [embed] });
+    }
+}
+
+// Legacy config handler
+async function handleLegacyConfig(message) {
+    const embed = new EmbedBuilder()
+        .setColor(0x7289DA)
+        .setTitle('🔧 Bot Configuration')
+        .addFields(
+            { name: '🌐 Web Server URL', value: WEB_SERVER_URL || 'Not set', inline: false },
+            { name: '🤖 Client ID', value: CLIENT_ID ? '✅ Set' : '❌ Not set', inline: true },
+            { name: '🔑 Bot Token', value: BOT_TOKEN ? '✅ Set' : '❌ Not set', inline: true },
+            { name: '📡 Remote Config', value: '✅ Active', inline: true }
+        )
+        .addFields({ name: '🔄 Reload Config', value: 'Use `!reload-config` to refresh settings', inline: false })
+        .setFooter({ text: 'Configuration loaded from remote source' })
+        .setTimestamp();
+
+    await message.reply({ embeds: [embed] });
+}
+
+// [Rest of the existing functions remain the same - handleSlashUpload, handleSlashSongs, etc.]
+// I'll include the key ones here for completeness:
+
 async function handleSlashUpload(interaction) {
     await interaction.deferReply();
 
@@ -287,6 +453,11 @@ async function handleSlashHelp(interaction) {
                 name: '❓ `/help`', 
                 value: 'Show this help message', 
                 inline: false 
+            },
+            { 
+                name: '🔧 `/config`', 
+                value: 'Show bot configuration (Admin only)', 
+                inline: false 
             }
         )
         .addFields(
@@ -307,7 +478,7 @@ async function handleSlashHelp(interaction) {
             }
         )
         .setThumbnail(client.user.displayAvatarURL())
-        .setFooter({ text: 'Legacy commands (!upload, !songs, !player) also work' })
+        .setFooter({ text: 'Legacy commands (!upload, !songs, !player) also work • Config loaded remotely' })
         .setTimestamp();
 
     await interaction.reply({ embeds: [embed] });
@@ -349,7 +520,7 @@ async function handleLegacyPlayer(message) {
             { name: '📤 Upload Songs', value: 'Use `/upload` or `!upload` with an audio file', inline: true },
             { name: '📋 List Songs', value: 'Use `/songs` or `!songs`', inline: true }
         )
-        .setFooter({ text: 'Try the new slash commands with /' })
+        .setFooter({ text: 'Try the new slash commands with / • Remote config active' })
         .setTimestamp();
 
     await message.reply({ embeds: [embed] });
@@ -365,15 +536,18 @@ async function handleLegacyHelp(message) {
             { name: '`/songs`', value: 'List all songs', inline: true },
             { name: '`/player`', value: 'Get web player link', inline: true },
             { name: '`/delete`', value: 'Delete songs', inline: true },
-            { name: '`/help`', value: 'Show detailed help', inline: true }
+            { name: '`/help`', value: 'Show detailed help', inline: true },
+            { name: '`/config`', value: 'Show bot config (Admin)', inline: true }
         )
         .addFields(
             { name: '\u200B', value: '**Legacy Commands:**', inline: false },
             { name: '`!upload`', value: 'Upload with attachment', inline: true },
             { name: '`!songs`', value: 'List songs', inline: true },
-            { name: '`!player`', value: 'Get player link', inline: true }
+            { name: '`!player`', value: 'Get player link', inline: true },
+            { name: '`!config`', value: 'Show config (Admin)', inline: true },
+            { name: '`!reload-config`', value: 'Reload remote config (Admin)', inline: true }
         )
-        .setFooter({ text: 'Use slash commands (/) for the best experience!' });
+        .setFooter({ text: 'Use slash commands (/) for the best experience! • Remote config active' });
 
     await message.reply({ embeds: [embed] });
 }
@@ -471,8 +645,7 @@ async function uploadSong(context, attachment, title, artist, isSlash) {
                     { name: '📊 File Size', value: formatFileSize(attachment.size), inline: true },
                     { name: '🌐 Web Player', value: `[Open Player](${WEB_SERVER_URL})`, inline: true }
                 )
-                .setThumbnail('https://cdn.discordapp.com/emojis/🎵.png')
-                .setFooter({ text: `Uploaded by ${isSlash ? context.user.tag : context.author.tag}` })
+                .setFooter({ text: `Uploaded by ${isSlash ? context.user.tag : context.author.tag} • Remote config active` })
                 .setTimestamp();
 
             if (isSlash) {
@@ -494,13 +667,18 @@ async function uploadSong(context, attachment, title, artist, isSlash) {
             errorMessage = 'File is too large. Maximum size is 50MB.';
         } else if (error.code === 'ENOTFOUND') {
             errorMessage = 'Web server is not accessible. Please check the server status.';
+        } else if (error.code === 'ETIMEDOUT') {
+            errorMessage = 'Upload timed out. Please try again with a smaller file.';
         }
 
         const errorEmbed = new EmbedBuilder()
             .setColor(0xFF0000)
             .setTitle('❌ Upload Failed')
             .setDescription(errorMessage)
-            .addFields({ name: 'File', value: attachment.name })
+            .addFields(
+                { name: 'File', value: attachment.name },
+                { name: 'Web Server', value: WEB_SERVER_URL }
+            )
             .setTimestamp();
 
         if (isSlash) {
@@ -517,7 +695,7 @@ async function uploadSong(context, attachment, title, artist, isSlash) {
 
 async function showSongsList(context, isSlash) {
     try {
-        const response = await axios.get(`${WEB_SERVER_URL}/api/songs`);
+        const response = await axios.get(`${WEB_SERVER_URL}/api/songs`, { timeout: 10000 });
         const songs = response.data;
 
         if (songs.length === 0) {
@@ -526,6 +704,7 @@ async function showSongsList(context, isSlash) {
                 .setTitle('🎵 Empty Playlist')
                 .setDescription('No songs uploaded yet!')
                 .addFields({ name: 'Get Started', value: 'Use `/upload` to add your first song!' })
+                .setFooter({ text: 'Remote config active' })
                 .setTimestamp();
 
             if (isSlash) {
@@ -560,7 +739,7 @@ async function showSongsList(context, isSlash) {
                 { name: '📄 Page', value: `${currentPage}/${totalPages}`, inline: true },
                 { name: '🌐 Web Player', value: `[Open Player](${WEB_SERVER_URL})`, inline: true }
             )
-            .setFooter({ text: 'Use /delete to remove songs • /upload to add more' })
+            .setFooter({ text: 'Use /delete to remove songs • /upload to add more • Remote config active' })
             .setTimestamp();
 
         if (isSlash) {
@@ -576,7 +755,10 @@ async function showSongsList(context, isSlash) {
             .setColor(0xFF0000)
             .setTitle('❌ Error')
             .setDescription('Could not fetch songs from the web player.')
-            .addFields({ name: 'Possible Issues', value: '• Web server is offline\n• Network connection issues' })
+            .addFields(
+                { name: 'Possible Issues', value: '• Web server is offline\n• Network connection issues' },
+                { name: 'Web Server URL', value: WEB_SERVER_URL }
+            )
             .setTimestamp();
 
         if (isSlash) {
@@ -603,6 +785,12 @@ function formatFileSize(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+// Periodic config refresh (every 30 minutes)
+setInterval(async () => {
+    console.log('🔄 Performing periodic config refresh...');
+    await loadRemoteConfig();
+}, 30 * 60 * 1000); // 30 minutes
+
 // Error handling
 client.on('error', (error) => {
     console.error('Discord client error:', error);
@@ -610,6 +798,18 @@ client.on('error', (error) => {
 
 client.on('warn', (warning) => {
     console.warn('Discord client warning:', warning);
+});
+
+client.on('disconnect', () => {
+    console.warn('⚠️ Discord client disconnected');
+});
+
+client.on('reconnecting', () => {
+    console.log('🔄 Discord client reconnecting...');
+});
+
+client.on('resume', () => {
+    console.log('✅ Discord client resumed connection');
 });
 
 process.on('unhandledRejection', (reason, promise) => {
@@ -634,11 +834,27 @@ process.on('SIGTERM', () => {
     process.exit(0);
 });
 
-// Login to Discord
-client.login(BOT_TOKEN).catch(error => {
-    console.error('❌ Failed to login to Discord:', error);
-    process.exit(1);
-});
+// Main startup function
+async function startBot() {
+    console.log('🚀 Starting Discord Music Bot...');
+    
+    // Load remote configuration first
+    const configLoaded = await loadRemoteConfig();
+    
+    if (!configLoaded) {
+        console.error('❌ Could not load configuration. Exiting...');
+        process.exit(1);
+    }
+    
+    // Login to Discord
+    try {
+        await client.login(BOT_TOKEN);
+        console.log('✅ Bot startup completed successfully!');
+    } catch (error) {
+        console.error('❌ Failed to login to Discord:', error);
+        process.exit(1);
+    }
+}
 
-console.log('🚀 Starting Discord Music Bot...');
-console.log(`🌐 Web Server URL: ${WEB_SERVER_URL}`);
+// Start the bot
+startBot();
